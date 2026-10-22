@@ -6,7 +6,7 @@
   "scripts": {
     "build": "sh scripts/runtime.sh sync",
     "check": "sh scripts/runtime.sh check",
-    "health": "curl --fail --silent --show-error http://127.0.0.1:8791/healthz",
+    "health": ".venv/bin/python -m tracker.health",
     "logs": "journalctl -u farm-tracker.service -n 50 --no-pager",
     "restart": "sudo systemctl restart farm-tracker.service",
     "status": "systemctl status farm-tracker.service --no-pager"

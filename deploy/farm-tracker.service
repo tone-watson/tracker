@@ -9,9 +9,11 @@ User=gradywoodruff
 Group=gradywoodruff
 WorkingDirectory=/srv/farm/private/tracker
 ExecStart=/srv/farm/private/tracker/.venv/bin/python -m tracker
+Environment=TRACKER_PORT=8792
 Environment=TRACKER_DATABASE=/data/databases/personal/tracker/tracker.db
 Environment=TRACKER_FARM_ENTITLEMENT_CREDENTIAL_FILE=/srv/farm/private/tracker/secrets/tracker-entitlement.token
 Restart=on-failure
+RestartPreventExitStatus=78
 RestartSec=5
 TimeoutStopSec=20
 UMask=0077

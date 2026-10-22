@@ -15,21 +15,48 @@ from .errors import TrackerError
 from .store import Store, encoded
 
 
+class StartupError(Exception):
+    """Operator configuration is incomplete; restarting cannot repair it."""
+
+
+def load_auth(path):
+    try:
+        credential = Path(path).read_text().strip()
+    except FileNotFoundError:
+        raise StartupError(
+            f"Tracker entitlement credential is missing: {path}. "
+            "Run .venv/bin/python -m tracker.setup_auth --apply from the Tracker repository, "
+            "then restart farm-tracker.service."
+        ) from None
+    except (OSError, UnicodeError):
+        raise StartupError(
+            "Tracker cannot read its entitlement credential. Check the configured path, "
+            "file ownership and permissions before restarting."
+        ) from None
+    try:
+        return FarmAuth(credential)
+    except ValueError:
+        raise StartupError(
+            "Tracker entitlement credential is malformed. Restore its registered private "
+            "credential before restarting; do not replace it with an unrelated token."
+        ) from None
+
+
 def create_app(database=None, auth=None, now=None):
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 256 * 1024
     app.json.ensure_ascii = False
-    store = Store(
-        database
-        or os.environ.get("TRACKER_DATABASE", "/data/databases/personal/tracker/tracker.db"),
-        now,
-    )
     if auth is None:
         path = os.environ.get(
             "TRACKER_FARM_ENTITLEMENT_CREDENTIAL_FILE",
             "/srv/farm/private/tracker/secrets/tracker-entitlement.token",
         )
-        auth = FarmAuth(Path(path).read_text().strip())
+        auth = load_auth(path)
+    store = Store(
+        database
+        or os.environ.get("TRACKER_DATABASE", "/data/databases/personal/tracker/tracker.db"),
+        now,
+    )
     app.extensions["tracker_store"] = store
 
     @app.before_request
@@ -193,7 +220,11 @@ def main():
     from waitress import serve
 
     os.umask(0o077)
-    app = create_app()
+    try:
+        app = create_app()
+    except StartupError as error:
+        logging.getLogger("tracker").error("%s", error)
+        raise SystemExit(78) from None
     stop = threading.Event()
     worker = threading.Thread(
         target=run_scheduler, args=(app.extensions["tracker_store"], stop), daemon=True
@@ -203,7 +234,7 @@ def main():
         serve(
             app,
             host="127.0.0.1",
-            port=int(os.environ.get("TRACKER_PORT", "8791")),
+            port=int(os.environ.get("TRACKER_PORT", "8792")),
             threads=4,
             max_request_body_size=256 * 1024,
             ident="Tracker",

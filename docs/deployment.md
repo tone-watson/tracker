@@ -14,9 +14,21 @@ In `/srv/farm/private/tracker`, `sh scripts/runtime.sh sync` installs the exact
 lint and compilation. The initial project version is 0.1.0; subsequent versions
 and releases belong to the normal Farm workflow.
 
-Follow the API's full [Tracker access runbook](/srv/farm/sys/api/docs/security/tracker-service-access.md)
-for the private entitlement credential, service registration preview/apply and
-selected-account MCP grant extension. The reviewed service policy is
+Before starting the service, run these from `/srv/farm/private/tracker`:
+
+```bash
+.venv/bin/python -m tracker.setup_auth
+.venv/bin/python -m tracker.setup_auth --apply
+```
+
+The first command previews the missing prerequisites without changing files or
+Farm policy. The second creates a private credential only when none exists and
+registers Tracker through Farm's existing provisioning helper. Repeated runs
+reuse the same credential; conflicting existing registration is rejected.
+Neither command changes user, client or agent grants. Credentials are never printed.
+
+Then follow the API's [Tracker access runbook](/srv/farm/sys/api/docs/security/tracker-service-access.md)
+for the selected-account MCP grant extension. The reviewed service policy is
 `/srv/farm/sys/api/docs/security/fixtures/tracker-service-policy.json`. It does not
 authorize arbitrary new users. Scope names are `todos.read`/`todos.write` upstream
 and `tracker.todos.read`/`tracker.todos.write` in MCP. All authorized callers share
@@ -24,7 +36,9 @@ all Tracker lists.
 
 The credential file is `/srv/farm/private/tracker/secrets/tracker-entitlement.token`.
 Keep its directory mode 0700 and file mode 0600. It is ignored by Git. The service
-fails startup if the file is absent or malformed. It never prints the credential.
+fails startup with an actionable message and exit status 78 if the file is absent,
+unreadable or malformed. The unit does not retry configuration failures. Fix the
+prerequisite and explicitly restart. It never prints the credential.
 
 ## Install the service and HTTP route
 
@@ -44,9 +58,35 @@ sudo systemctl reload nginx.service
 ```
 
 The symlink command is first-install only; if that path exists, inspect its target
-before reusing it. The service listens only on 127.0.0.1:8791. Nginx follows the
+before reusing it. The service listens only on 127.0.0.1:8792. Port 8791 belongs to the existing DP
+service and must not be reused for Tracker. Nginx follows the
 existing Farm Cloudflare Tunnel pattern: public TLS terminates at Cloudflare;
 loopback HTTP reaches nginx. Request/task content is not access-logged.
+
+## Repair an installation made with the original 8791 configuration
+
+If Tracker was enabled before its credential existed, stop the repeated failures
+before setup. After releasing the source fix, run:
+
+```bash
+sudo systemctl stop farm-tracker.service
+cd /srv/farm/private/tracker
+.venv/bin/python -m tracker.setup_auth
+.venv/bin/python -m tracker.setup_auth --apply
+sudo install -m 0644 deploy/farm-tracker.service /etc/systemd/system/farm-tracker.service
+sudo install -m 0644 deploy/tracker.noiseflood.farm /etc/nginx/sites-available/tracker.noiseflood.farm
+sudo systemctl daemon-reload
+sudo systemctl restart farm-tracker.service
+sudo nginx -t
+sudo systemctl reload nginx.service
+.venv/bin/python -m tracker.health
+```
+
+The existing nginx symlink can stay. These steps repair startup and port routing;
+they do not add the tunnel hostname, DNS, Farm MCP user grants or external client
+ceilings. Complete those steps below before expecting agent tools to work. A
+successful `cloudflared ... ingress validate` does not prove the Tracker ingress
+entry exists. Do not restart or change DP.
 
 ## Add the public hostname to the existing tunnel
 
@@ -94,8 +134,9 @@ New tools may require refreshing the agent connection's tool catalog.
 
 ## Acceptance
 
-Verify `curl --fail http://127.0.0.1:8791/healthz` and the equivalent public health
-route. Use the newly authorized agent to create an explicitly temporary list,
+Verify `.venv/bin/python -m tracker.health` (also the manifest's health command)
+and the equivalent public health route. Require `data.contract: farm.tracker/1`
+and `data.status: ok`; HTTP 200 alone can come from another service. Use the newly authorized agent to create an explicitly temporary list,
 create an overdue item with phone/JSON details, verify due ordering, complete and
 reopen it, read its history, create/skip/cancel a recurring series and finally
 cancel the temporary list. Never use real personal tasks as a destructive test.

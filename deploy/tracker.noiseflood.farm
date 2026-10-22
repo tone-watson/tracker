@@ -7,7 +7,7 @@ server {
     error_log /var/log/nginx/tracker.noiseflood.farm.error.log crit;
 
     location / {
-        proxy_pass http://127.0.0.1:8791;
+        proxy_pass http://127.0.0.1:8792;
         proxy_http_version 1.1;
         proxy_set_header Host tracker.noiseflood.farm;
         proxy_set_header X-Forwarded-Proto https;
