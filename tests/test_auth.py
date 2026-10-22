@@ -401,6 +401,7 @@ def test_http_transport_only_sends_service_proof_to_the_fixed_entitlement_url(mo
     auth = FarmAuth("fsvc_" + "a" * 64)
     auth._transport("jwks")
     auth._transport("service-entitlement", {"user_id": "42", "app_session_id": "family-42"})
+    assert all(request.get_header("User-agent") == "farm-tracker/1" for request in calls)
     assert calls[0].full_url == ISSUER + "/v1/auth/jwks"
     assert calls[0].get_header("Authorization") is None
     assert calls[1].full_url == ISSUER + "/v1/auth/service-entitlement"
@@ -414,7 +415,12 @@ def test_http_transport_only_sends_service_proof_to_the_fixed_entitlement_url(mo
 
 @pytest.mark.parametrize(
     "failure",
-    [URLError("offline"), TimeoutError(), HTTPError(ISSUER, 302, "redirect", {}, None)],
+    [
+        URLError("offline"),
+        TimeoutError(),
+        HTTPError(ISSUER, 302, "redirect", {}, None),
+        HTTPError(ISSUER, 403, "access denied", {}, None),
+    ],
 )
 def test_http_network_errors_and_redirects_are_authorization_unavailable(monkeypatch, failure):
     class Opener:

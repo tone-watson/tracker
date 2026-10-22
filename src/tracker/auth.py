@@ -57,7 +57,7 @@ class FarmAuth:
         self.lock = threading.Lock()
 
     def _transport(self, endpoint, body=None):
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/json", "User-Agent": "farm-tracker/1"}
         if body is not None:
             headers.update(
                 {"Authorization": "Bearer " + self.credential, "Content-Type": "application/json"}
