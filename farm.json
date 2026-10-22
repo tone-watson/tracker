@@ -1,7 +1,7 @@
 {
   "name": "tracker",
   "description": "Private agent-managed task lists through Farm MCP",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "workflow": "release",
   "scripts": {
     "build": "sh scripts/runtime.sh sync",
