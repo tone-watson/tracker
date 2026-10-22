@@ -1,0 +1,15 @@
+{
+  "name": "tracker",
+  "description": "Private agent-managed task lists through Farm MCP",
+  "version": "0.1.0",
+  "workflow": "release",
+  "scripts": {
+    "build": "sh scripts/runtime.sh sync",
+    "check": "sh scripts/runtime.sh check",
+    "health": "curl --fail --silent --show-error http://127.0.0.1:8791/healthz",
+    "logs": "journalctl -u farm-tracker.service -n 50 --no-pager",
+    "restart": "sudo systemctl restart farm-tracker.service",
+    "status": "systemctl status farm-tracker.service --no-pager"
+  },
+  "release": {"commands": ["sh scripts/runtime.sh check"]}
+}

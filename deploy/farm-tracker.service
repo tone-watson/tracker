@@ -1,0 +1,31 @@
+[Unit]
+Description=Farm Tracker task service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=gradywoodruff
+Group=gradywoodruff
+WorkingDirectory=/srv/farm/private/tracker
+ExecStart=/srv/farm/private/tracker/.venv/bin/python -m tracker
+Environment=TRACKER_DATABASE=/data/databases/personal/tracker/tracker.db
+Environment=TRACKER_FARM_ENTITLEMENT_CREDENTIAL_FILE=/srv/farm/private/tracker/secrets/tracker-entitlement.token
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/data/databases/personal/tracker
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
