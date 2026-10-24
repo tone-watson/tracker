@@ -7,11 +7,12 @@ linked worktrees and symlinked repositories are excluded to avoid duplicate or
 redirected writes. It does not search arbitrary Markdown files.
 
 Run `farm init` inside each participating repository. The command locates the
-Git root, creates missing `farm.json` and `.farm/`, and adds `.farm/` to the root
-`.gitignore`, creating that file if needed. Existing manifests and local state
-are preserved. No Git repository, branch, commit, release or TODO file is created
-by initialization. `.gitignore` is a normal source change for that repository's
-usual workflow; `.farm/` is local operational state.
+Git root, creates missing `farm.json` and `.farm/`, and ensures `.farm/` is in
+the account's global Git excludes file. Existing manifests, repository ignore
+files and local state are preserved. No Git repository, branch, commit, release
+or TODO file is created by initialization. A new `farm.json` follows the
+repository's usual workflow; `.farm/` is local operational state. `farm todo`
+also initializes Farm when used inside a Git working tree.
 
 `python -m tracker.sync --initialize` runs that command in each discovered
 repository that already has TODO.md, then performs the first import. Ordinary

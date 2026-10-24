@@ -42,13 +42,13 @@ Prepare all discovered repositories with a root TODO file and import them:
 .venv/bin/python -m tracker.sync --initialize
 ```
 
-This runs the new `farm init` inside each qualifying repository, preserving its
-manifest and adding `.farm/` to its root `.gitignore`. It then creates the Farm
-list and imports existing tasks. It **does write** the live Tracker database and
+This runs `farm init` inside each qualifying repository, preserving its manifest
+and ensuring `.farm/` is in the account's global Git excludes file. It then creates
+the Farm list and imports existing tasks. It **does write** the live Tracker database and
 per-repository sync state; source checkboxes are preserved on the initial import.
-It has not been run by implementation tests. Review/commit `.gitignore` changes
-through each repository's normal workflow. To initialize just one repository,
-run `farm init` there, then request sync. See [sync semantics and recovery](repository-sync.md).
+It has not been run by implementation tests. Existing repository ignore rules are
+preserved. To initialize just one repository, run `farm init` there, then request
+sync. See [sync semantics and recovery](repository-sync.md).
 
 Install the new browser and sync services and replace the nginx route:
 
