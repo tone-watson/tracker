@@ -1,6 +1,11 @@
 # Changelog
 
 
+## v1.2.0 - 2026-10-24
+### CHANGED:
+- Document global Farm state ignores and todo initialization
+
+
 ## v1.1.0 - 2026-10-24
 ### CHANGED:
 - Add Tracker web workspace and repository TODO synchronization
