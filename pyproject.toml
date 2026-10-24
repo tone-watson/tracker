@@ -3,7 +3,13 @@ name = "farm-tracker"
 version = "0.1.0"
 description = "Private agent-managed task lists through Farm MCP"
 requires-python = ">=3.11"
-dependencies = ["Flask>=3.1,<4", "PyJWT[crypto]>=2.10,<3", "python-dateutil>=2.9,<3", "waitress>=3,<4"]
+dependencies = [
+    "Flask>=3.1,<4",
+    "markdown-it-py>=3,<5",
+    "PyJWT[crypto]>=2.10,<3",
+    "python-dateutil>=2.9,<3",
+    "waitress>=3,<4",
+]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]

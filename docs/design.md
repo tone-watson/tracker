@@ -8,7 +8,7 @@ Farm user/client IDs are recorded in history and do not restrict individual list
 ## Lists, items and history
 
 List names are unique without case distinction. Each item belongs to one list and
-can move between lists. List names and item titles are limited to 200 characters;
+can move between lists. List names are limited to 200 characters and item titles to 4,000 characters;
 descriptions to 4,000. New databases are empty; examples such as Personal, Work and
 Noiseflood are not automatically created.
 
@@ -153,3 +153,14 @@ History is oldest first. Item ordering can also use `order_by=created_at`.
 SQLite uses WAL, foreign keys, a busy timeout, transactional versioned schema
 initialization and unique recurrence occurrence indexes. The existing recursive
 dbops discovery and SQLite backup API cover the new database without changes.
+
+## Browser and repository tasks
+
+The authenticated browser UI is served at `https://tracker.noiseflood.farm/`.
+An isolated `tracker-web` Farm browser client keeps encrypted server-side sessions;
+the browser receives an HttpOnly host-only cookie. Browser API requests use the
+same Tracker audience tokens and live entitlement checks as MCP. The UI supports
+list/task creation, guarded edits, completion, due filters, extra text/JSON details
+and history. Repository tasks add a Farm list grouped by repository; see
+[repository synchronization](repository-sync.md) for mapping, conflict policy,
+snapshots, scheduling and recovery.

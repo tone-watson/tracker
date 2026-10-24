@@ -133,12 +133,23 @@ def create_app(database=None, auth=None, now=None):
                 "default_timezone": "America/Chicago",
                 "recurrence_catchup": "all_occurrences",
                 "statuses": ["open", "in_progress", "blocked", "completed", "cancelled"],
+                "repository_sync": {"interval_hours": 4, "conflict_policy": "tracker_wins"},
             }
         )
 
     @app.get("/api/v1/lists")
     def lists():
         return result(store.page("list", request.args.to_dict()))
+
+    @app.get("/api/v1/repositories")
+    def repositories():
+        return result(store.repositories())
+
+    @app.post("/api/v1/sync")
+    def request_sync():
+        if body():
+            raise TrackerError("invalid_request", "Sync requests take an empty JSON object")
+        return result(store.request_sync()), 202
 
     @app.post("/api/v1/lists")
     def create_list():

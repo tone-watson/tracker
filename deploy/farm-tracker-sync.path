@@ -1,0 +1,9 @@
+[Unit]
+Description=Synchronize repository TODO files after Tracker edits
+
+[Path]
+PathChanged=/data/databases/personal/tracker/sync.request
+Unit=farm-tracker-sync.service
+
+[Install]
+WantedBy=multi-user.target

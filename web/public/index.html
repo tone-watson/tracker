@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Tracker · Farm</title>
+    <link rel="stylesheet" href="/app.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <section id="login" class="login-screen" hidden>
+      <form id="login-form" class="login-card">
+        <div class="wordmark">
+          <span class="mark">✓</span> TRACKER
+          <span class="farm-label">/ FARM</span>
+        </div>
+        <h1>A little less<br />on your mind.</h1>
+        <p>Your lists, your projects, and what’s next.</p>
+        <label
+          >Farm email<input
+            name="email"
+            type="email"
+            autocomplete="username"
+            required
+        /></label>
+        <label
+          >Password<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required
+        /></label>
+        <p id="login-error" class="error" role="alert"></p>
+        <button class="primary" type="submit">
+          Sign in to Tracker <span>→</span>
+        </button>
+        <button id="reset-login" class="quiet" type="button" hidden>
+          Sign out of the previous session
+        </button>
+      </form>
+    </section>
+    <div id="workspace" class="workspace" hidden>
+      <aside class="sidebar">
+        <div class="wordmark"><span class="mark">✓</span> TRACKER</div>
+        <div class="sidebar-caption">YOUR WORKSPACE</div>
+        <nav id="navigation" aria-label="Lists"></nav>
+        <button id="new-list" class="quiet sidebar-add">+ New list</button>
+        <div class="sidebar-bottom">
+          <span id="account"></span
+          ><button id="logout" class="quiet">Sign out</button>
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <span class="eyebrow">FARM / TRACKER</span>
+          <div>
+            <button id="sync" class="quiet">↻ Sync repositories</button
+            ><button id="refresh" class="quiet">Refresh</button>
+          </div>
+        </header>
+        <section class="page-heading">
+          <div>
+            <p id="breadcrumb" class="eyebrow">ALL LISTS</p>
+            <h1 id="page-title">Your tasks</h1>
+            <p id="page-description">Make room for what matters.</p>
+          </div>
+          <button id="new-task" class="primary">+ New task</button>
+        </section>
+        <div id="message" class="message" role="status" hidden></div>
+        <section class="toolbar" aria-label="Task filters">
+          <div class="tabs" role="group" aria-label="Task status">
+            <button data-status="active" aria-pressed="true">To do</button
+            ><button data-status="completed" aria-pressed="false">
+              Completed</button
+            ><button data-status="all" aria-pressed="false">All</button>
+          </div>
+          <div class="filters">
+            <label class="search"
+              ><span>⌕</span
+              ><input
+                id="search"
+                type="search"
+                placeholder="Search tasks"
+                aria-label="Search tasks" /></label
+            ><label class="overdue"
+              ><input id="overdue" type="checkbox" />Overdue only</label
+            >
+          </div>
+        </section>
+        <section
+          id="sync-status"
+          class="sync-status"
+          aria-label="Repository sync status"
+          hidden
+        ></section>
+        <section
+          id="tasks"
+          class="tasks"
+          aria-label="Tasks"
+          aria-live="polite"
+        ></section>
+        <footer class="task-footer">
+          <span id="loaded-count"></span
+          ><button id="load-more" class="quiet" hidden>
+            Load more tasks ↓
+          </button>
+        </footer>
+      </main>
+    </div>
+    <dialog id="editor">
+      <form id="task-form">
+        <div class="dialog-top">
+          <span class="eyebrow" id="editor-label">TASK</span
+          ><button
+            type="button"
+            data-close
+            class="icon-button"
+            aria-label="Close task"
+          >
+            ×
+          </button>
+        </div>
+        <label
+          >Task<textarea
+            name="title"
+            maxlength="4000"
+            rows="3"
+            required
+            placeholder="What needs to happen?"
+          ></textarea>
+        </label>
+        <div class="field-row">
+          <label>List<select name="list_id" required></select></label
+          ><label id="repository-field"
+            >Repository<select name="repository_id"></select
+          ></label>
+        </div>
+        <div class="field-row">
+          <label
+            >Status<select name="status">
+              <option value="open">To do</option>
+              <option value="in_progress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select></label
+          ><label
+            >Due<input
+              name="due"
+              placeholder="2026-10-24, 2026-11, or a date/time"
+          /></label>
+        </div>
+        <label
+          >Timezone<input
+            name="timezone"
+            value="America/Chicago"
+            placeholder="America/Chicago" /></label
+        ><label
+          >Notes<textarea
+            name="description"
+            rows="4"
+            maxlength="4000"
+            placeholder="Anything worth remembering"
+          ></textarea>
+        </label>
+        <p id="task-context" class="muted"></p>
+        <p id="editor-error" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" data-close class="quiet">Close</button
+          ><button class="primary" id="save-task" type="submit">
+            Save task
+          </button>
+        </div>
+      </form>
+      <section id="details-panel">
+        <h2>Details</h2>
+        <div id="details"></div>
+        <form id="detail-form" class="detail-form">
+          <label
+            >Label<input
+              name="label"
+              maxlength="200"
+              required
+              placeholder="Phone number, reference, or note" /></label
+          ><label
+            >Format<select name="kind">
+              <option value="text">Text</option>
+              <option value="json">Structured JSON</option>
+            </select></label
+          ><label
+            >Value<textarea name="value" required rows="3"></textarea>
+          </label>
+          <p id="detail-error" class="error" role="alert"></p>
+          <button class="quiet" type="submit">+ Add detail</button>
+        </form>
+        <details>
+          <summary>Activity history</summary>
+          <div id="history"></div>
+        </details>
+      </section>
+    </dialog>
+    <dialog id="list-editor">
+      <form id="list-form">
+        <div class="dialog-top">
+          <h2>New list</h2>
+          <button
+            type="button"
+            data-close
+            class="icon-button"
+            aria-label="Close new list"
+          >
+            ×
+          </button>
+        </div>
+        <label
+          >Name<input
+            name="name"
+            required
+            maxlength="200"
+            placeholder="Personal, Work, Noiseflood…" /></label
+        ><label
+          >Description<textarea
+            name="description"
+            maxlength="4000"
+            rows="3"
+          ></textarea>
+        </label>
+        <p id="list-error" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" data-close class="quiet">Cancel</button
+          ><button class="primary" type="submit">Create list</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="loading" class="loading">Opening your workspace…</div>
+  </body>
+</html>

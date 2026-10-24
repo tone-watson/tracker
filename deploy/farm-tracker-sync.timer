@@ -1,0 +1,12 @@
+[Unit]
+Description=Check repository TODO files every four hours
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*-*-* 00,04,08,12,16,20:00:00
+Persistent=true
+RandomizedDelaySec=2min
+Unit=farm-tracker-sync.service
+
+[Install]
+WantedBy=timers.target

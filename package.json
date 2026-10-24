@@ -1,0 +1,19 @@
+{
+  "name": "farm-tracker-web",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "start": "node web/server/main.mjs",
+    "test": "node --test web/tests/*.test.mjs",
+    "test:browser": "node web/tests/ui-smoke.mjs"
+  },
+  "dependencies": {
+    "@noiseflood/auth": "file:vendor/noiseflood-auth-0.5.0.tgz"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

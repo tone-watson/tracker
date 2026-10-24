@@ -1,18 +1,109 @@
 # Install and activate Tracker
 
+## Upgrade to the web workspace and repository sync
+
+This change modifies Tracker, Farm CLI and Farm MCP. Release CLI first (for
+`farm init`), Tracker second (new API/schema), and MCP last (new tool metadata).
+No API service change or restart is required. Install Tracker's locked Python
+and Node dependencies before running its release checks:
+
+```bash
+cd /srv/farm/private/tracker
+sh scripts/runtime.sh sync
+sh scripts/runtime.sh check
+```
+
+The browser uses the installed Node runtime
+`/home/gradywoodruff/.nvm/versions/node/v22.23.4/bin/node`. The release checks run
+Python tests, Ruff, compilation, Node auth/proxy tests and frontend syntax checks.
+Optional browser acceptance is `npm run test:browser` with Playwright Chromium
+installed; it uses only fixture routes and never logs in to the live service.
+
+After the normal releases, provision the separate Tracker browser client for the
+existing selected Farm account. Preview first; apply adds only the browser client
+and that account's grant, preserving Tracker service and MCP policy. Credentials
+are reused on later runs and never printed:
+
+```bash
+cd /srv/farm/private/tracker
+.venv/bin/python scripts/setup_web.py --user-id 1ea80ff0-605d-4c1c-a4c9-5e76442d3c31
+.venv/bin/python scripts/setup_web.py --user-id 1ea80ff0-605d-4c1c-a4c9-5e76442d3c31 --apply
+```
+
+The account must already have Tracker read/write entitlement. Browser credentials
+are in ignored `secrets/tracker-web.token` and `secrets/tracker-web-vault.key`;
+encrypted browser sessions live in `/var/lib/farm-tracker-web/sessions`, created
+by systemd. The initial UI uses Farm email/password sign-in; passkeys are not
+registered for this new client.
+
+Prepare all discovered repositories with a root TODO file and import them:
+
+```bash
+.venv/bin/python -m tracker.sync --initialize
+```
+
+This runs the new `farm init` inside each qualifying repository, preserving its
+manifest and adding `.farm/` to its root `.gitignore`. It then creates the Farm
+list and imports existing tasks. It **does write** the live Tracker database and
+per-repository sync state; source checkboxes are preserved on the initial import.
+It has not been run by implementation tests. Review/commit `.gitignore` changes
+through each repository's normal workflow. To initialize just one repository,
+run `farm init` there, then request sync. See [sync semantics and recovery](repository-sync.md).
+
+Install the new browser and sync services and replace the nginx route:
+
+```bash
+sudo install -m 0644 /srv/farm/private/tracker/deploy/farm-tracker-web.service /etc/systemd/system/farm-tracker-web.service
+sudo install -m 0644 /srv/farm/private/tracker/deploy/farm-tracker-sync.service /etc/systemd/system/farm-tracker-sync.service
+sudo install -m 0644 /srv/farm/private/tracker/deploy/farm-tracker-sync.timer /etc/systemd/system/farm-tracker-sync.timer
+sudo install -m 0644 /srv/farm/private/tracker/deploy/farm-tracker-sync.path /etc/systemd/system/farm-tracker-sync.path
+sudo install -m 0644 /srv/farm/private/tracker/deploy/tracker.noiseflood.farm /etc/nginx/sites-available/tracker.noiseflood.farm
+sudo systemctl daemon-reload
+sudo systemctl restart farm-tracker.service
+sudo systemctl enable --now farm-tracker-web.service farm-tracker-sync.timer farm-tracker-sync.path
+sudo nginx -t
+sudo systemctl reload nginx.service
+sudo systemctl restart farm-mcp.service
+```
+
+The API automatically upgrades SQLite schema 1 to 2 transactionally, preserving
+existing tasks, history and receipts. The same migration runs if initial sync
+is invoked first. A previously running API process can remain up while initial
+import is prepared; restart it before enabling web/MCP calls to the new routes.
+No backup configuration is changed.
+
+Tracker API remains on loopback port 8792, browser backend uses 8793, and existing
+public DNS/tunnel configuration stays the same. Raw `/api/` stays on the API;
+frontend assets, `/auth/` and `/browser/api/` use the browser backend. No further
+Cloudflare tunnel restart is needed.
+
+Open `https://tracker.noiseflood.farm/` and sign in. Confirm ordinary lists and
+Farm repository groups, edit a disposable source task, and verify both its
+Markdown checkbox and Tracker history. The sync status should settle to synced.
+The two new MCP tools need tool-catalog refresh; existing Tracker OAuth scopes
+are unchanged. A health response or isolated browser fixture does not establish
+live Farm browser login or successful production file synchronization.
+
+For future releases, restart `farm-tracker.service` for Python changes and
+`farm-tracker-web.service` for browser-server changes. Static assets are served
+from disk; refresh the browser after frontend changes. Sync is a one-shot worker
+and uses new source on its next run. Reinstall changed unit/config files and run
+`sudo systemctl daemon-reload` before restarting their services.
+
+## Original service installation
+
 Source and isolated tests do not activate the live app. The deployment has three
 repositories: API provisioning support, Tracker, and MCP. Release them in that
 order using the normal `farm release` workflow from each repository. API changes
-are CLI provisioning support only and need no API restart. Tracker initializes
-schema version 1 transactionally on its first start; no existing data is migrated.
+are CLI provisioning support only and need no API restart. Tracker initializes schema version 2 on first start and upgrades existing version 1
+databases transactionally, preserving records and history.
 No backup configuration changes are required.
 
 ## Prepare runtime and Farm permissions
 
 In `/srv/farm/private/tracker`, `sh scripts/runtime.sh sync` installs the exact
 `uv.lock` into the isolated `.venv`, and `sh scripts/runtime.sh check` runs tests,
-lint and compilation. The initial project version is 0.1.0; subsequent versions
-and releases belong to the normal Farm workflow.
+lint and compilation. Versions and releases belong to the normal Farm workflow.
 
 Before starting the service, run these from `/srv/farm/private/tracker`:
 

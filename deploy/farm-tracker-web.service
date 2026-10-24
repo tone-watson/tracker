@@ -1,0 +1,32 @@
+[Unit]
+Description=Farm Tracker browser sign-in and frontend
+Wants=network-online.target
+After=network-online.target farm-tracker.service
+
+[Service]
+Type=simple
+User=gradywoodruff
+Group=gradywoodruff
+WorkingDirectory=/srv/farm/private/tracker
+ExecStart=/home/gradywoodruff/.nvm/versions/node/v22.23.4/bin/node /srv/farm/private/tracker/web/server/main.mjs
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=5
+TimeoutStopSec=25
+UMask=0077
+StateDirectory=farm-tracker-web
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/farm-tracker-web
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

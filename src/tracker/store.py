@@ -3,6 +3,8 @@
 import base64
 import hashlib
 import json
+import logging
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -47,6 +49,22 @@ CREATE TABLE receipts (
 CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL);
 INSERT INTO metadata VALUES(1,0);
 PRAGMA user_version=1;
+COMMIT;
+"""
+
+REPOSITORY_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE repositories (
+    id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+    pending INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'pending',
+    generation INTEGER NOT NULL DEFAULT 0,
+    last_synced_at TEXT, error TEXT, task_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE sync_control (id INTEGER PRIMARY KEY CHECK(id=1), requested INTEGER NOT NULL);
+INSERT INTO sync_control VALUES(1,0);
+CREATE TABLE sync_commits (token TEXT PRIMARY KEY);
+CREATE INDEX repository_items ON objects(json_extract(data,'$.repository_id')) WHERE kind='item';
+PRAGMA user_version=2;
 COMMIT;
 """
 
@@ -120,13 +138,24 @@ class Store:
         with sqlite3.connect(self.path, isolation_level=None) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA journal_mode=WAL")
+            db.execute("BEGIN IMMEDIATE")
             version = db.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
-                db.executescript(SCHEMA)
-            elif version != 1:
+                self._schema(db, SCHEMA)
+                version = 1
+            if version == 1:
+                self._schema(db, REPOSITORY_SCHEMA)
+            elif version != 2:
                 raise RuntimeError(
                     "Unsupported Tracker database schema; use the matching service version"
                 )
+
+    @staticmethod
+    def _schema(db, script):
+        for statement in script.split(";"):
+            statement = statement.strip()
+            if statement and statement not in {"BEGIN IMMEDIATE", "COMMIT"}:
+                db.execute(statement)
 
     @contextmanager
     def connect(self, write=False):
@@ -139,12 +168,41 @@ class Store:
             yield db
             if db.in_transaction:
                 db.commit()
+            if write and (
+                db.execute("SELECT 1 FROM repositories WHERE pending=1 LIMIT 1").fetchone()
+                or db.execute("SELECT requested FROM sync_control WHERE id=1").fetchone()[0]
+            ):
+                self._notify_sync()
         except Exception:
             if db.in_transaction:
                 db.rollback()
             raise
         finally:
             db.close()
+
+    def _notify_sync(self):
+        try:
+            descriptor = os.open(
+                str(Path(self.path).parent / "sync.request"),
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                0o600,
+            )
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(stamp(self.now()))
+        except OSError:
+            logging.getLogger("tracker").warning("Sync notification failed; periodic sync will retry")
+
+    def repositories(self):
+        with self.connect() as db:
+            rows = [dict(row) for row in db.execute("SELECT * FROM repositories ORDER BY path")]
+        for row in rows:
+            row["pending"] = bool(row["pending"])
+        return {"items": rows, "interval_hours": 4}
+
+    def request_sync(self):
+        with self.connect(True) as db:
+            db.execute("UPDATE sync_control SET requested=1 WHERE id=1")
+        return {"queued": True}
 
     def _get(self, db, kind, object_id):
         identifier(object_id)
@@ -212,6 +270,11 @@ class Store:
             ),
         )
         db.execute("UPDATE metadata SET version=version+1 WHERE id=1")
+        if kind == "item" and obj.get("repository_id") and actor.get("client_id") != "tracker-sync":
+            db.execute(
+                "UPDATE repositories SET pending=1,generation=generation+1,state='pending',error=NULL WHERE id=?",
+                (obj["repository_id"],),
+            )
         return obj
 
     def _create(self, operation, body, actor, callback):
@@ -261,6 +324,8 @@ class Store:
         with self.connect(True) as db:
             before = self._get(db, "list", object_id)
             self._expected(before, body["expected_revision"])
+            if before.get("type") == "farm" and body.get("status") == "cancelled":
+                raise TrackerError("managed_list", "The Farm list is managed by repository sync", 409)
             obj = dict(before)
             if "name" in body:
                 obj["name"] = text(body["name"], "name")
@@ -365,13 +430,15 @@ class Store:
             "due": due,
             "status": status,
             "blocked_by": blockers or [],
-            "completed_at": None,
+            "completed_at": stamp(self.now()) if status == "completed" else None,
             "cancelled_at": None,
             "skipped_at": None,
             "recurrence_id": recurrence_id,
             "occurrence_index": index,
             "recurrence_advanced": False,
         }
+        if template.get("repository_id"):
+            obj["repository_id"] = template["repository_id"]
         self._blockers(db, obj)
         obj = self._put(db, "item", obj, actor, "created")
         self._save_blockers(db, obj)
@@ -398,15 +465,19 @@ class Store:
                 "due",
                 "recurrence",
                 "details",
+                "repository_id",
             },
             {"idempotency_key", "list_id", "title"},
         )
         template = {
             "list_id": identifier(body["list_id"]),
-            "title": text(body["title"], "title"),
+            "title": text(body["title"], "title", 4000),
             "description": text(body.get("description", ""), "description", 4000, True),
             "details": detail_template(body.get("details", [])),
         }
+        if body.get("repository_id"):
+            template["repository_id"] = identifier(body["repository_id"])
+            self._source_title(template["title"])
         due = self._due(body.get("due"))
         recurrence = (
             self._recurrence(body["recurrence"], due)
@@ -418,8 +489,17 @@ class Store:
             raise TrackerError("invalid_request", "New items must be open, in_progress, or blocked")
 
         def create(db):
-            if self._get(db, "list", template["list_id"])["status"] != "active":
+            parent = self._get(db, "list", template["list_id"])
+            if parent["status"] != "active":
                 raise TrackerError("list_cancelled", "Restore the list before adding items", 409)
+            repository_id = template.get("repository_id")
+            if bool(repository_id) != (parent.get("type") == "farm"):
+                raise TrackerError("repository_required", "Farm tasks require a repository; other lists do not")
+            if repository_id:
+                if not db.execute("SELECT 1 FROM repositories WHERE id=?", (repository_id,)).fetchone():
+                    raise TrackerError("not_found", "Repository not found", 404)
+                if recurrence:
+                    raise TrackerError("invalid_recurrence", "Repository tasks cannot recur automatically")
             series = None
             if recurrence:
                 series = self._put(
@@ -533,11 +613,18 @@ class Store:
             before = self._get(db, "item", object_id)
             self._expected(before, body["expected_revision"])
             obj = dict(before)
-            for key, maximum in (("title", 200), ("description", 4000)):
+            for key, maximum in (("title", 4000), ("description", 4000)):
                 if key in body:
                     obj[key] = text(body[key], key, maximum, key == "description")
             if "list_id" in body:
                 obj["list_id"] = identifier(body["list_id"])
+            parent = self._get(db, "list", obj["list_id"])
+            if obj.get("repository_id"):
+                self._source_title(obj["title"])
+                if obj["list_id"] != before["list_id"]:
+                    raise TrackerError("managed_item", "Repository tasks must stay in the Farm list", 409)
+            elif parent.get("type") == "farm":
+                raise TrackerError("repository_required", "Create a repository task in Farm instead of moving it")
             if self._get(db, "list", obj["list_id"])["status"] != "active":
                 raise TrackerError(
                     "list_cancelled", "Restore the list before editing its items", 409
@@ -569,6 +656,11 @@ class Store:
             if advance:
                 self._advance_completion(db, obj, actor)
             return obj
+
+    @staticmethod
+    def _source_title(value):
+        if any(character in value for character in ("\n", "\r", "\x00")):
+            raise TrackerError("invalid_request", "Repository task titles must occupy one Markdown line")
 
     def add_detail(self, item_id, body, actor):
         fields(
@@ -624,7 +716,7 @@ class Store:
             before = self._get(db, "recurrence", object_id)
             self._expected(before, body["expected_revision"])
             obj = dict(before)
-            for key, maximum in (("title", 200), ("description", 4000)):
+            for key, maximum in (("title", 4000), ("description", 4000)):
                 if key in body:
                     obj[key] = text(body[key], key, maximum, key == "description")
             if "details" in body:
@@ -745,7 +837,7 @@ class Store:
         if kind in {"list", "item", "recurrence"}:
             allowed |= {"status", "q"}
         if kind == "item":
-            allowed |= {"list_id", "order_by", "overdue_only"}
+            allowed |= {"list_id", "repository_id", "order_by", "overdue_only"}
         fields(query, allowed)
         try:
             limit = int(query.get("limit", 10))
@@ -821,6 +913,9 @@ class Store:
                         args.extend([term, term, term])
                 order = "created_at,id"
                 if kind == "item":
+                    if query.get("repository_id"):
+                        where.append("json_extract(data,'$.repository_id')=?")
+                        args.append(identifier(query["repository_id"]))
                     if query.get("list_id"):
                         self._get(db, "list", query["list_id"])
                         where.append("list_id=?")
