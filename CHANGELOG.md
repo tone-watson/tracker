@@ -1,6 +1,11 @@
 # Changelog
 
 
+## v1.2.1 - 2026-10-24
+### CHANGED:
+- Update gitignore
+
+
 ## v1.2.0 - 2026-10-24
 ### CHANGED:
 - Document global Farm state ignores and todo initialization
