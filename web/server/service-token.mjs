@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createAuthorityFetch } from './authority-fetch.mjs';
 
 export class HttpError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -7,15 +8,16 @@ const invalid = () => new HttpError(401, 'invalid_token', 'Sign in to use Tracke
 const identifier = value => typeof value === 'string' && /^[\w:@.-]{1,256}$/.test(value);
 
 
-export function createVerifier(fetchKeys = async () => {
-  const res = await fetch('https://noiseflood.farm/v1/auth/jwks', {
-    headers: { 'User-Agent': 'farm-tracker-web/1' }, redirect: 'error', signal: AbortSignal.timeout(10000), credentials: 'omit',
-  });
-  if (!res.ok) throw new HttpError(503, 'auth_unavailable', 'Farm sign-in is unavailable.');
-  const text = await res.text();
-  if (text.length > 128 * 1024) throw invalid();
-  return JSON.parse(text);
-}) {
+export function createJwksFetch({ transportOrigin } = {}) {
+  const authority = createAuthorityFetch({ transportOrigin, maximumBytes: 128 * 1024, timeoutMs: 10000 });
+  return async () => {
+    const res = await authority('/v1/auth/jwks');
+    if (!res.ok) throw new HttpError(503, 'auth_unavailable', 'Farm sign-in is unavailable.');
+    return res.json();
+  };
+}
+
+export function createVerifier(fetchKeys = createJwksFetch()) {
   let keys = new Map(), updated = 0, pending;
   async function refresh() {
     pending ??= (async () => {

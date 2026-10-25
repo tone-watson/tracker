@@ -1,12 +1,14 @@
 """Farm service JWT verification and live, session-bound entitlement checks."""
 
 import json
+import os
 import re
 import threading
 import time
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.parse import urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 import jwt
 
@@ -15,6 +17,49 @@ from .errors import TrackerError
 ISSUER = "https://noiseflood.farm"
 AUDIENCE = "urn:farm:service:tracker"
 SCOPES = {"todos.read", "todos.write"}
+DEFAULT_TRANSPORT_ORIGIN = "http://127.0.0.1"
+
+
+class TransportConfigError(ValueError):
+    """The configured authority transport is not an allowed destination."""
+
+
+def authority_transport_origin(value=None):
+    """Select transport separately from the public JWT issuer and audience."""
+    if value is None:
+        value = os.environ.get("TRACKER_FARM_TRANSPORT_ORIGIN", DEFAULT_TRANSPORT_ORIGIN)
+    try:
+        if not isinstance(value, str) or re.search(r"[\s\\?#]", value):
+            raise ValueError()
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or not re.fullmatch(
+                r"(?:127\.0\.0\.1|\[::1\]|noiseflood\.farm)(?::[0-9]{1,5})?",
+                parsed.netloc.lower(),
+            )
+            or (parsed.port is not None and not 1 <= parsed.port <= 65535)
+            or not (
+                parsed.hostname in {"127.0.0.1", "::1"}
+                or (
+                    parsed.scheme == "https"
+                    and parsed.hostname == "noiseflood.farm"
+                    and parsed.port in {None, 443}
+                )
+            )
+        ):
+            raise ValueError()
+        return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    except ValueError:
+        raise TransportConfigError(
+            "TRACKER_FARM_TRANSPORT_ORIGIN must be a literal loopback HTTP(S) origin "
+            "or https://noiseflood.farm, without a path or credentials"
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -42,12 +87,13 @@ def invalid():
 
 
 class FarmAuth:
-    def __init__(self, credential, transport=None, now=time.time):
+    def __init__(self, credential, transport=None, now=time.time, *, transport_origin=None):
         if not isinstance(credential, str) or not re.fullmatch(
             r"fsvc_[A-Za-z0-9_-]{43,128}", credential
         ):
             raise ValueError("Tracker requires a private Farm entitlement credential")
         self.credential = credential
+        self.transport_origin = authority_transport_origin(transport_origin)
         self.transport = transport or self._transport
         self.now = now
         self.keys = {}
@@ -57,18 +103,27 @@ class FarmAuth:
         self.lock = threading.Lock()
 
     def _transport(self, endpoint, body=None):
-        headers = {"Accept": "application/json", "User-Agent": "farm-tracker/1"}
+        if not (
+            (endpoint == "jwks" and body is None)
+            or (endpoint == "service-entitlement" and isinstance(body, dict))
+        ):
+            raise ValueError("Untrusted Farm authorization request")
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "farm-tracker/1",
+            "Host": "noiseflood.farm",
+        }
         if body is not None:
             headers.update(
                 {"Authorization": "Bearer " + self.credential, "Content-Type": "application/json"}
             )
         request = Request(
-            ISSUER + "/v1/auth/" + endpoint,
+            self.transport_origin + "/v1/auth/" + endpoint,
             data=None if body is None else json.dumps(body).encode(),
             headers=headers,
         )
         try:
-            with build_opener(NoRedirect).open(request, timeout=5) as response:
+            with build_opener(ProxyHandler({}), NoRedirect).open(request, timeout=5) as response:
                 raw = response.read(131073)
                 if len(raw) > 131072:
                     raise unavailable()

@@ -1,5 +1,52 @@
 # Install and activate Tracker
 
+## Local Farm authorization transport
+
+Tracker's API and browser backend send Farm authorization requests through the
+existing local nginx route by default: `http://127.0.0.1`, with the fixed HTTP
+Host `noiseflood.farm`. This covers API JWKS and live entitlement checks, browser
+login/session/service-token requests, and browser JWKS. Public JWT issuer
+`https://noiseflood.farm`, audience `urn:farm:service:tracker`, browser URLs,
+credentials and permission checks are unchanged. Every authenticated API request
+still checks the current Farm session and entitlement; local transport does not
+cache or bypass that decision.
+
+`TRACKER_FARM_TRANSPORT_ORIGIN` overrides the physical destination for both
+processes. It accepts an HTTP(S) origin on literal `127.0.0.1` or `::1`, or the
+canonical `https://noiseflood.farm` origin for an explicit public-route rollback.
+Paths, query strings, fragments, userinfo, DNS aliases and other hosts are rejected.
+The configured destination never comes from a request or token. Redirects are
+rejected, environment HTTP proxies are ignored, and local failure does not retry
+over the public route. Response limits and request timeouts remain enforced.
+
+No dependency, schema, nginx or systemd unit changes are needed for this upgrade.
+Run the normal Tracker release, then restart both processes:
+
+```bash
+cd /srv/farm/private/tracker
+farm release patch
+sudo systemctl restart farm-tracker.service farm-tracker-web.service
+```
+
+MCP has the matching local transport change in its own release. Release and
+restart Tracker first, then release MCP (which builds its server) and run
+`sudo systemctl restart farm-mcp.service`. Either version remains protocol
+compatible during this sequence. There is no new OAuth grant, credential
+provisioning, forced sign-in or tool-catalog refresh.
+
+For an explicit public-route rollback, set
+`Environment=TRACKER_FARM_TRANSPORT_ORIGIN=https://noiseflood.farm` in a systemd
+service override for **both** `farm-tracker.service` and
+`farm-tracker-web.service`, run `sudo systemctl daemon-reload`, then restart both
+services. Removing those overrides restores the local default after the same
+reload/restart sequence. No override is needed for ordinary activation.
+
+Isolated tests use temporary HTTP servers and signed fixture tokens to check the
+actual Host header, credential separation, public issuer/audience, rejected
+redirects and revoked sessions. Existing local nginx routes were also checked
+without credentials. These checks do not establish live browser login or a
+delegated production tool call after the operator restarts the services.
+
 ## Upgrade to the web workspace and repository sync
 
 This change modifies Tracker, Farm CLI and Farm MCP. Release CLI first (for

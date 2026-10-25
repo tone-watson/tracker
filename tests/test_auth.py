@@ -2,7 +2,9 @@
 
 import copy
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 
@@ -11,7 +13,15 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from tracker import auth as module
-from tracker.auth import AUDIENCE, ISSUER, FarmAuth, NoRedirect
+from tracker.auth import (
+    AUDIENCE,
+    ISSUER,
+    FarmAuth,
+    NoRedirect,
+    ProxyHandler,
+    TransportConfigError,
+    authority_transport_origin,
+)
 from tracker.errors import TrackerError
 
 
@@ -392,9 +402,9 @@ def test_http_transport_only_sends_service_proof_to_the_fixed_entitlement_url(mo
             return Response()
 
     def opener(*handlers):
-        assert len(handlers) == 1 and (
-            handlers[0] is NoRedirect or isinstance(handlers[0], NoRedirect)
-        )
+        assert len(handlers) == 2
+        assert isinstance(handlers[0], ProxyHandler) and handlers[0].proxies == {}
+        assert handlers[1] is NoRedirect
         return Opener()
 
     monkeypatch.setattr(module, "build_opener", opener)
@@ -402,9 +412,10 @@ def test_http_transport_only_sends_service_proof_to_the_fixed_entitlement_url(mo
     auth._transport("jwks")
     auth._transport("service-entitlement", {"user_id": "42", "app_session_id": "family-42"})
     assert all(request.get_header("User-agent") == "farm-tracker/1" for request in calls)
-    assert calls[0].full_url == ISSUER + "/v1/auth/jwks"
+    assert all(request.get_header("Host") == "noiseflood.farm" for request in calls)
+    assert calls[0].full_url == "http://127.0.0.1/v1/auth/jwks"
     assert calls[0].get_header("Authorization") is None
-    assert calls[1].full_url == ISSUER + "/v1/auth/service-entitlement"
+    assert calls[1].full_url == "http://127.0.0.1/v1/auth/service-entitlement"
     assert calls[1].get_header("Authorization") == "Bearer " + auth.credential
     assert json.loads(calls[1].data) == {"user_id": "42", "app_session_id": "family-42"}
     assert (
@@ -454,3 +465,124 @@ def test_http_response_size_and_json_are_bounded(monkeypatch, payload):
     with pytest.raises(TrackerError) as caught:
         FarmAuth("fsvc_" + "a" * 64)._transport("jwks")
     assert (caught.value.status, caught.value.code) == (503, "authorization_unavailable")
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://127.0.0.1", "http://127.0.0.1:9000/", "http://[::1]:9000",
+        "https://127.0.0.1", "https://noiseflood.farm", "https://noiseflood.farm:443/",
+    ],
+)
+def test_transport_configuration_accepts_only_local_or_canonical_public_origin(origin):
+    assert authority_transport_origin(origin) == origin.rstrip("/")
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "", "http://noiseflood.farm", "https://attacker.invalid", "http://localhost",
+        "http://127.1", "http://2130706433", "http://0x7f000001", "http://127.0.0.2",
+        "http://127.0.0.1.attacker.invalid", "https://noiseflood.farm:444",
+        "http://user:secret@127.0.0.1", "http://127.0.0.1/path", "http://127.0.0.1/..",
+        "http://127.0.0.1?", "http://127.0.0.1#", "http://127.0.0.1:0",
+        "http://127.0.0.1:65536", "http://127.0.0.1:bad", "http://[::1",
+        "http://[::1]attacker.invalid", "http://127.0.0.1:", "http://%31%32%37.0.0.1",
+        "http://127.0.0.1\\@attacker.invalid", " http://127.0.0.1", "http://127.0.0.1\n",
+        "http://127.0.0.1\t", "file:///tmp/auth", "//127.0.0.1",
+    ],
+)
+def test_transport_configuration_rejects_untrusted_or_ambiguous_origin(origin):
+    with pytest.raises(TransportConfigError) as caught:
+        authority_transport_origin(origin)
+    assert "secret" not in str(caught.value)
+
+
+def test_transport_environment_does_not_change_public_identity(monkeypatch):
+    monkeypatch.setenv("TRACKER_FARM_TRANSPORT_ORIGIN", "http://[::1]:9000")
+    auth = FarmAuth("fsvc_" + "a" * 64)
+    assert auth.transport_origin == "http://[::1]:9000"
+    assert ISSUER == "https://noiseflood.farm"
+    assert AUDIENCE == "urn:farm:service:tracker"
+
+
+@pytest.mark.parametrize(
+    "endpoint,body",
+    [("jwks", {}), ("service-entitlement", None), ("service-entitlement", []),
+     ("../login", {}), ("jwks?next=elsewhere", None), ("https://attacker.invalid", {})],
+)
+def test_transport_rejects_unapproved_requests_before_network(monkeypatch, endpoint, body):
+    def unexpected(*_):
+        pytest.fail("invalid authority request reached the network")
+
+    monkeypatch.setattr(module, "build_opener", unexpected)
+    with pytest.raises(ValueError, match="Untrusted Farm authorization request"):
+        FarmAuth("fsvc_" + "a" * 64)._transport(endpoint, body)
+
+
+@pytest.fixture
+def local_authority(farm, monkeypatch):
+    requests = []
+    farm.http_status = 200
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def respond(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            requests.append((self.command, self.path, dict(self.headers), body))
+            self.send_response(farm.http_status)
+            if farm.http_status == 302:
+                self.send_header("Location", "/redirected")
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            data = farm.jwks if self.path == "/v1/auth/jwks" else farm.reply
+            self.wfile.write(json.dumps(data).encode())
+
+        do_GET = respond
+        do_POST = respond
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://127.0.0.1:{server.server_port}"
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    farm.auth = FarmAuth("fsvc_" + "a" * 64, now=lambda: farm.clock[0], transport_origin=origin)
+    try:
+        yield requests
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_local_wire_transport_keeps_public_jwt_and_live_revocation(farm, local_authority):
+    principal = farm.auth.authenticate(farm.sign(), "todos.write")
+    assert principal.subject == "42"
+    assert [(r[0], r[1]) for r in local_authority] == [
+        ("GET", "/v1/auth/jwks"), ("POST", "/v1/auth/service-entitlement"),
+    ]
+    assert all(r[2]["Host"] == "noiseflood.farm" for r in local_authority)
+    assert "Authorization" not in local_authority[0][2]
+    assert local_authority[1][2]["Authorization"] == "Bearer " + farm.auth.credential
+    assert json.loads(local_authority[1][3]) == {
+        "user_id": "42", "app_session_id": "family-42",
+    }
+    expect_error(farm, farm.sign({"iss": farm.auth.transport_origin}))
+    expect_error(farm, farm.sign({"aud": "urn:farm:service:manager"}))
+    expect_error(farm, farm.sign(key=farm.keys[1]))
+    assert len(local_authority) == 2
+    farm.reply["data"]["session_active"] = False
+    expect_error(farm, code="service_access_denied", status=403)
+    assert len(local_authority) == 3
+    assert local_authority[-1][1] == "/v1/auth/service-entitlement"
+
+
+def test_local_transport_never_follows_redirects(farm, local_authority):
+    farm.http_status = 302
+    expect_error(farm, code="authorization_unavailable", status=503)
+    assert [r[1] for r in local_authority] == ["/v1/auth/jwks"]

@@ -10,7 +10,7 @@ from uuid import uuid4
 from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
-from .auth import FarmAuth
+from .auth import FarmAuth, TransportConfigError
 from .errors import TrackerError
 from .store import Store, encoded
 
@@ -35,6 +35,8 @@ def load_auth(path):
         ) from None
     try:
         return FarmAuth(credential)
+    except TransportConfigError as error:
+        raise StartupError(str(error)) from None
     except ValueError:
         raise StartupError(
             "Tracker entitlement credential is malformed. Restore its registered private "

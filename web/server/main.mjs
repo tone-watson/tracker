@@ -2,6 +2,13 @@ import fs from 'node:fs';
 import { createSessions } from './sessions.mjs';
 import { createApp } from './app.mjs';
 import { createCentralFetch } from './central-fetch.mjs';
+import { authorityOrigin } from './authority-fetch.mjs';
+
+try { authorityOrigin(); }
+catch (error) {
+  console.error(error.message);
+  process.exit(78);
+}
 
 let sessions;
 try {

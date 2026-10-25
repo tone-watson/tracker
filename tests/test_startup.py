@@ -26,6 +26,18 @@ def test_malformed_credential_message_does_not_contain_secret(tmp_path):
     assert "malformed" in str(error.value)
 
 
+def test_bad_transport_is_reported_before_database_creation(tmp_path, monkeypatch):
+    path = tmp_path / "token"
+    path.write_text("fsvc_" + "a" * 64)
+    database = tmp_path / "db" / "tracker.db"
+    monkeypatch.setenv("TRACKER_FARM_ENTITLEMENT_CREDENTIAL_FILE", str(path))
+    monkeypatch.setenv("TRACKER_FARM_TRANSPORT_ORIGIN", "https://user:secret@attacker.invalid")
+    with pytest.raises(app.StartupError, match="TRACKER_FARM_TRANSPORT_ORIGIN") as error:
+        app.create_app(database)
+    assert "secret" not in str(error.value)
+    assert not database.parent.exists()
+
+
 def test_unreadable_credential_has_safe_diagnostic(monkeypatch):
     def fail(*args, **kwargs):
         raise PermissionError("private detail")

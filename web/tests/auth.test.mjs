@@ -253,7 +253,7 @@ test('confidential central transport identifies itself and never forwards browse
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
   const credential = 'fbff_' + 'x'.repeat(43);
-  const central = createCentralFetch({ credential, baseURL: `http://127.0.0.1:${server.address().port}` });
+  const central = createCentralFetch({ credential, transportOrigin: `http://127.0.0.1:${server.address().port}` });
   await central('https://noiseflood.farm/v1/auth/me', { headers: { Cookie: 'private=browser', 'X-API-Key': 'wrong' } });
   assert.equal(seen[0].headers['user-agent'], 'farm-tracker-web/1');
   assert.equal(seen[0].headers['x-farm-client-credential'], credential);
