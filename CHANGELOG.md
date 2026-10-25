@@ -1,6 +1,11 @@
 # Changelog
 
 
+## v1.2.2 - 2026-10-25
+### CHANGED:
+- Route Tracker authorization through local Farm transport
+
+
 ## v1.2.1 - 2026-10-24
 ### CHANGED:
 - Update gitignore
