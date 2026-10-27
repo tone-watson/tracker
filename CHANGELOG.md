@@ -1,6 +1,11 @@
 # Changelog
 
 
+## v1.2.3 - 2026-10-27
+### CHANGED:
+- Update alias path in farm.json
+
+
 ## v1.2.2 - 2026-10-25
 ### CHANGED:
 - Route Tracker authorization through local Farm transport

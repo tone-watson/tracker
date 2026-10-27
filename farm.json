@@ -1,8 +1,10 @@
 {
-  "alias": ["tracker"],
+  "alias": [
+    "tracker"
+  ],
   "name": "tracker",
   "description": "Private agent-managed task lists through Farm MCP",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "workflow": "release",
   "scripts": {
     "build": "sh scripts/runtime.sh sync",
